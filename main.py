@@ -1,12 +1,20 @@
 import csv
 import json
 import os
+import random
 import re
+import time
 import requests
 from bs4 import BeautifulSoup
 
 BASE_URL = "https://news.ltn.com.tw/list/breakingnews"
 AJAX_URL = "https://news.ltn.com.tw/ajax/breakingnews/all/{}"
+
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) Chrome/124.0.0.0 Safari/537.36",
+]
 
 PATH_CATEGORY_MAP = {
     "politics": "政治",
@@ -16,6 +24,26 @@ PATH_CATEGORY_MAP = {
     "local": "地方",
     "business": "財經",
 }
+
+
+def get_headers():
+    return {
+        "User-Agent": random.choice(USER_AGENTS),
+        "Connection": "keep-alive",
+    }
+
+
+def get_web_content(url, max_retry=3):
+    for i in range(1, max_retry + 1):
+        try:
+            res = requests.get(url, headers=get_headers(), timeout=10)
+            if res.status_code == 200:
+                res.encoding = "utf-8"
+                return res.text
+        except Exception as e:
+            print(f"第 {i} 次失敗: {e}")
+            time.sleep(random.uniform(1.5, 3.5))
+    return None
 
 
 def find_category(url):
@@ -49,7 +77,11 @@ def parse_first_page(html):
 
 
 def parse_ajax_json(json_text):
-    data = json.loads(json_text)
+    try:
+        data = json.loads(json_text)
+    except Exception:
+        return []
+
     if data.get("code") != 200 or not data.get("data"):
         return []
 
@@ -74,16 +106,28 @@ def parse_ajax_json(json_text):
 
 
 all_news = []
-for page in range(1, 4):
-    if page == 1:
-        res = requests.get(BASE_URL)
-        res.encoding = "utf-8"
-        news = parse_first_page(res.text)
-    else:
-        res = requests.get(AJAX_URL.format(page))
-        news = parse_ajax_json(res.text)
+visited_urls = set()
 
-    all_news.extend(news)
+for page in range(1, 4):
+    target_url = BASE_URL if page == 1 else AJAX_URL.format(page)
+    print(f"正在爬取第 {page} 頁...")
+
+    html_or_json = get_web_content(target_url)
+    if not html_or_json:
+        break
+
+    page_news = (
+        parse_first_page(html_or_json)
+        if page == 1
+        else parse_ajax_json(html_or_json)
+    )
+
+    for item in page_news:
+        if item["url"] not in visited_urls:
+            visited_urls.add(item["url"])
+            all_news.append(item)
+
+    time.sleep(random.uniform(1.5, 3.5))
 
 # 儲存 CSV
 file_path = os.path.join(
@@ -96,4 +140,4 @@ with open(file_path, "w", newline="", encoding="utf-8-sig") as f:
     writer.writeheader()
     writer.writerows(all_news)
 
-print(f"累計抓取 {len(all_news)} 筆新聞！")
+print(f"成功儲存 {len(all_news)} 筆新聞！")
