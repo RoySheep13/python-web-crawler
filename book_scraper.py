@@ -1,36 +1,14 @@
-"""
-Python 網路爬蟲 - 線上書店書籍資訊擷取
-==========================================
-自主學習專案：Python 爬蟲研究與開發
-
-技術重點：
-1. User-Agent 偽裝：從多組瀏覽器 User-Agent 中隨機挑選，
-   降低被伺服器辨識為機器人程式的機率
-2. 隨機請求延遲：每次發送請求之間加入隨機秒數的等待，
-   避免對伺服器造成過大負擔（伺服器禮儀），
-   同時降低因請求頻率異常而被判定、封鎖 IP 的風險
-3. 例外處理與重試機制：面對逾時、連線失敗等狀況，
-   自動重試並延長等待時間，提升程式穩定性
-4. 資料整理與輸出：將擷取結果整理成 CSV 檔，方便後續分析
-
-目標網站：https://books.toscrape.com
-（此網站專門提供給學習者練習網頁爬蟲技術，內容為示範用虛構書籍資料，
- 允許程式化存取，適合作為技術學習與展示用途）
-"""
-
 import requests
 from bs4 import BeautifulSoup
 import time
 import random
 import csv
+import os
 from urllib.parse import urljoin
 
 
-# ------------------------- 基本設定 -------------------------
-
 BASE_URL = "https://books.toscrape.com/catalogue/page-{}.html"
 
-# User-Agent 池：每次請求隨機挑選一組，模擬不同瀏覽器/裝置的真實使用者
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -42,18 +20,16 @@ USER_AGENTS = [
     "Gecko/20100101 Firefox/125.0",
 ]
 
-# 星等文字轉換成數字，方便後續統計分析
 RATING_MAP = {"One": 1, "Two": 2, "Three": 3, "Four": 4, "Five": 5}
 
-# 每次請求之間的延遲區間（秒）。隨機取值可避免請求節奏過於規律而被偵測
 DELAY_RANGE = (1.5, 3.5)
 
-# 請求失敗時的最大重試次數
 MAX_RETRIES = 3
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def get_random_headers():
-    """隨機組合一組 request headers，模擬真實瀏覽器行為"""
     return {
         "User-Agent": random.choice(USER_AGENTS),
         "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
@@ -63,10 +39,6 @@ def get_random_headers():
 
 
 def fetch_page(url, retries=MAX_RETRIES):
-    """
-    發送 HTTP 請求並取得網頁原始碼。
-    包含錯誤處理與重試機制，避免單次網路異常導致整個程式中斷。
-    """
     for attempt in range(1, retries + 1):
         try:
             response = requests.get(url, headers=get_random_headers(), timeout=10)
@@ -76,7 +48,7 @@ def fetch_page(url, retries=MAX_RETRIES):
         except requests.exceptions.RequestException as e:
             print(f"  [警告] 第 {attempt} 次請求失敗：{e}")
             if attempt < retries:
-                wait = random.uniform(*DELAY_RANGE) * attempt  # 失敗越多次，等待越久
+                wait = random.uniform(*DELAY_RANGE) * attempt
                 print(f"  → {wait:.1f} 秒後重試...")
                 time.sleep(wait)
             else:
@@ -85,7 +57,6 @@ def fetch_page(url, retries=MAX_RETRIES):
 
 
 def parse_book_list(html, page_url):
-    """從書籍列表頁面中解析出每一本書的基本資訊"""
     soup = BeautifulSoup(html, "html.parser")
     books = []
 
@@ -116,16 +87,11 @@ def parse_book_list(html, page_url):
 
 
 def has_next_page(html):
-    """判斷目前頁面是否還有下一頁"""
     soup = BeautifulSoup(html, "html.parser")
     return soup.select_one("li.next a") is not None
 
 
 def scrape_books(max_pages=5):
-    """
-    主要爬蟲流程：
-    依序造訪每一頁書籍列表，直到達到 max_pages 或沒有下一頁為止。
-    """
     all_books = []
     page = 1
 
@@ -149,7 +115,6 @@ def scrape_books(max_pages=5):
             print("  已到達最後一頁")
             break
 
-        # 隨機延遲：兼顧程式穩定性與伺服器禮儀，避免造成過大流量負擔
         delay = random.uniform(*DELAY_RANGE)
         print(f"  等待 {delay:.1f} 秒後繼續...\n")
         time.sleep(delay)
@@ -160,18 +125,18 @@ def scrape_books(max_pages=5):
 
 
 def save_to_csv(books, filename="books_data.csv"):
-    """將擷取到的資料儲存為 CSV 檔案（utf-8-sig 方便用 Excel 開啟不亂碼）"""
     if not books:
         print("沒有資料可以儲存")
         return
 
+    filepath = os.path.join(SCRIPT_DIR, filename)
     fieldnames = ["title", "price", "rating", "stock", "detail_url"]
-    with open(filename, "w", newline="", encoding="utf-8-sig") as f:
+    with open(filepath, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(books)
 
-    print(f"\n已將 {len(books)} 筆資料儲存至 {filename}")
+    print(f"\n已將 {len(books)} 筆資料儲存至 {filepath}")
 
 
 if __name__ == "__main__":
@@ -179,7 +144,6 @@ if __name__ == "__main__":
     print("Python 網路爬蟲 - 書籍資訊擷取")
     print("=" * 50)
 
-    # 可自行調整想擷取的頁數（此網站共有 50 頁書籍列表）
     results = scrape_books(max_pages=5)
 
     save_to_csv(results, "books_data.csv")
