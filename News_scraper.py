@@ -1,65 +1,83 @@
+import csv
+import json
+import os
+import random
+import re
+import time
+from datetime import datetime, timedelta
 import requests
 from bs4 import BeautifulSoup
-import time
-import random
-import csv
-import os
-import re
-import json
-from datetime import datetime, timedelta
 
-
-# 自由時報「即時新聞」列表
-# 第1頁是一般網頁(HTML)，第2頁以後網站是用 AJAX 載入的(回傳 JSON)
 LIST_URL = "https://news.ltn.com.tw/list/breakingnews"
 AJAX_URL = "https://news.ltn.com.tw/ajax/breakingnews/all/{}"
 
 USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
-    "(KHTML, like Gecko) Version/17.4 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) "
-    "Gecko/20100101 Firefox/125.0",
+    (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
+        " like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15"
+        " (KHTML, like Gecko) Version/17.4 Safari/605.1.15"
+    ),
+    (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)"
+        " Chrome/124.0.0.0 Safari/537.36"
+    ),
+    (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101"
+        " Firefox/125.0"
+    ),
 ]
 
-# 網址裡的代號 -> 中文分類（列表上沒有分類文字，所以從網址判斷）
 PATH_CATEGORY = {
-    "politics": "政治", "society": "社會", "life": "生活", "world": "國際",
-    "local": "地方", "novelty": "蒐奇", "art": "藝文", "opinion": "評論",
-    "business": "財經", "china": "中國",
+    "politics": "政治",
+    "society": "社會",
+    "life": "生活",
+    "world": "國際",
+    "local": "地方",
+    "novelty": "蒐奇",
+    "art": "藝文",
+    "opinion": "評論",
+    "business": "財經",
+    "china": "中國",
 }
-# 有些新聞在子網域，例如 ent.ltn.com.tw 是娛樂
+
 SUBDOMAIN_CATEGORY = {
-    "ent": "娛樂", "sports": "體育", "talk": "評論", "ec": "財經",
-    "3c": "3C", "auto": "汽車", "health": "健康", "food": "食尚",
-    "istyle": "時尚", "def": "軍事",
+    "ent": "娛樂",
+    "sports": "體育",
+    "talk": "評論",
+    "ec": "財經",
+    "3c": "3C",
+    "auto": "汽車",
+    "health": "健康",
+    "food": "食尚",
+    "istyle": "時尚",
+    "def": "軍事",
 }
 
 DELAY_RANGE = (1.5, 3.5)
-
 MAX_RETRIES = 3
-
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def get_random_headers():
-    # 隨機換 User-Agent，假裝不是機器人
     return {
         "User-Agent": random.choice(USER_AGENTS),
         "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        (
+            "Accept"
+        ): "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Connection": "keep-alive",
     }
 
 
 def fetch_page(url, retries=MAX_RETRIES):
-    # 失敗就重試，每次等比較久（backoff）
     for attempt in range(1, retries + 1):
         try:
-            response = requests.get(url, headers=get_random_headers(), timeout=10)
+            response = requests.get(
+                url, headers=get_random_headers(), timeout=10
+            )
             response.raise_for_status()
             response.encoding = "utf-8"
             return response.text
@@ -75,13 +93,11 @@ def fetch_page(url, retries=MAX_RETRIES):
 
 
 def get_category(url):
-    # 例如 https://news.ltn.com.tw/news/life/breakingnews/5593527 -> 生活
     m = re.search(r"/news/([^/]+)/breakingnews/", url)
     if m:
         slug = m.group(1)
         return PATH_CATEGORY.get(slug, slug)
 
-    # 沒有分類代號的話，看子網域 (ent / sports / talk ...)
     m = re.search(r"//([^./]+)\.ltn\.com\.tw/", url)
     if m and m.group(1) != "news":
         return SUBDOMAIN_CATEGORY.get(m.group(1), m.group(1))
@@ -90,9 +106,6 @@ def get_category(url):
 
 
 def normalize_time(raw, now, prev):
-    # 把時間字串變成 datetime
-    # 列表上通常只有 "21:00"（沒有日期），所以要自己補上日期
-    # 新聞是新->舊排列，如果某則時間比前一則還晚，代表跨過午夜了，要減一天
     raw = (raw or "").strip()
 
     m = re.search(r"(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})", raw)
@@ -112,7 +125,6 @@ def normalize_time(raw, now, prev):
 
 
 def make_row(title, url, raw_time, now, prev):
-    # 把一則新聞整理成一筆 dict，順便回傳這則的時間給下一則比較用
     dt = normalize_time(raw_time, now, prev)
     row = {
         "title": re.sub(r"\s+", " ", title).strip(),
@@ -124,7 +136,6 @@ def make_row(title, url, raw_time, now, prev):
 
 
 def parse_news_list(html, now=None):
-    # 解析第1頁的 HTML
     now = now or datetime.now()
     soup = BeautifulSoup(html, "html.parser")
     news = []
@@ -148,8 +159,6 @@ def parse_news_list(html, now=None):
 
 
 def parse_news_json(text, now=None):
-    # 解析第2頁以後的 JSON
-    # 回傳 None 代表沒有更多資料（要停止），回傳 list 代表正常
     now = now or datetime.now()
     try:
         data = json.loads(text)
@@ -179,7 +188,7 @@ def parse_news_json(text, now=None):
 
 def scrape_news(max_pages=3):
     all_news = []
-    seen = set()  # 用網址去重複
+    seen = set()
     page = 1
 
     while page <= max_pages:
@@ -210,7 +219,10 @@ def scrape_news(max_pages=3):
             all_news.append(n)
             new_count += 1
 
-        print(f"  → 本頁擷取到 {new_count} 筆新資料，累計 {len(all_news)} 筆")
+        print(
+            f"  → 本頁擷取到 {new_count} 筆新資料，累計 {len(all_news)}"
+            " 筆"
+        )
 
         if page < max_pages:
             delay = random.uniform(*DELAY_RANGE)
@@ -247,7 +259,6 @@ if __name__ == "__main__":
     save_to_csv(results, "news_data.csv")
 
     if results:
-        # 算每個分類各有幾則
         count = {}
         for r in results:
             count[r["category"]] = count.get(r["category"], 0) + 1
